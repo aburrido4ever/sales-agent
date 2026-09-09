@@ -2,9 +2,9 @@ import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { CheckCircle2, Mic, MicOff, MessageCircleQuestion, Route, Sparkles, Target } from 'lucide-solid';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
-import { buildSimulatedBriefingReply, buildVisitObjectives, cancelSpeech, matchVoiceNavigationCommand, speakText } from '../services';
+import { SILENCE_ADVANCE_MS, buildSimulatedBriefingReply, buildVisitObjectives, cancelSpeech, matchVoiceNavigationCommand, speakText } from '../services';
 import type { VoiceNavigationCommand } from '../services';
-import type { Account, Opportunity, PreMeetingBriefing, SpeechRecognitionCtorWindow, SpeechRecognitionLike, SpeechRecognitionResultEventLike } from '../types';
+import type { Account, Contact, Opportunity, PreMeetingBriefing, SpeechRecognitionCtorWindow, SpeechRecognitionLike, SpeechRecognitionResultEventLike } from '../types';
 
 export type AisaBriefingStep = 'prompt' | 'summary' | 'qa' | 'ended';
 
@@ -12,6 +12,8 @@ type AisaBriefingDialogProps = {
   briefing: PreMeetingBriefing;
   account: Account;
   opportunity?: Opportunity;
+  /** Used to answer the decision-maker follow-up question with the account's real 2nd contact. */
+  contacts?: Contact[];
   /** Invoked by the "End briefing" action; the parent decides how to close the sheet. */
   onEndBriefing: () => void;
   /**
@@ -54,6 +56,13 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
   let nativeListening = false;
   let nativeStateListener: PluginListenerHandle | undefined;
   let speechToken = 0;
+  let turnTranscript = '';
+  let silenceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearSilenceTimer = () => {
+    if (silenceTimer) clearTimeout(silenceTimer);
+    silenceTimer = undefined;
+  };
 
   const objectives = createMemo(() => buildVisitObjectives(props.account, props.opportunity));
   const questions = () => props.briefing.suggestedQuestions;
@@ -81,6 +90,8 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
     nativeStateListener = undefined;
   };
   const stopVoiceCapture = () => {
+    clearSilenceTimer();
+    turnTranscript = '';
     setIsListening(false);
     recognition?.stop?.();
     recognition = undefined;
@@ -128,6 +139,24 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
     }
     recordReply(text);
   };
+  /**
+   * Fires after `SILENCE_ADVANCE_MS` of no new speech — advances to the next AISA question
+   * without requiring an explicit "next"/"finish" command, matching QuestionnaireStepper's
+   * conversational turn-taking pause.
+   */
+  const commitSpokenTurn = () => {
+    clearSilenceTimer();
+    const text = (turnTranscript || interimTranscript()).trim();
+    turnTranscript = '';
+    setInterimTranscript('');
+    if (!text) return;
+    stopVoiceCapture();
+    handleCapturedSpeech(text);
+  };
+  const scheduleSilenceCommit = () => {
+    clearSilenceTimer();
+    silenceTimer = setTimeout(commitSpokenTurn, SILENCE_ADVANCE_MS);
+  };
 
   const startNativeVoiceCapture = async () => {
     if (nativeListening || isListening()) return;
@@ -172,7 +201,7 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
         maxResults: 5,
         partialResults: false,
         popup: false,
-        prompt: "Answer AISA's question, or say next, previous, or finish.",
+        prompt: "Answer AISA's question — I'll continue automatically. Say previous or finish to override.",
       });
       const bestFinalMatch = result.matches?.find((match) => match.trim());
       if (bestFinalMatch) {
@@ -200,7 +229,7 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
 
     recognition = new SpeechCtor();
     recognition.lang = 'en-US';
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.onresult = (event: SpeechRecognitionResultEventLike) => {
       let finalTranscript = '';
@@ -219,7 +248,8 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
       }
 
       setInterimTranscript(interim);
-      if (finalTranscript) handleCapturedSpeech(finalTranscript);
+      if (finalTranscript) turnTranscript = `${turnTranscript}${turnTranscript ? ' ' : ''}${finalTranscript}`;
+      if (finalTranscript || interim) scheduleSilenceCommit();
     };
     recognition.onerror = () => {
       stopVoiceCapture();
@@ -249,7 +279,7 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
 
   const handleSimulateAnswer = () => {
     setVoiceNotice(undefined);
-    recordReply(buildSimulatedBriefingReply(promptIndex(), props.account, props.opportunity));
+    recordReply(buildSimulatedBriefingReply(promptIndex(), props.account, props.opportunity, props.contacts ?? []));
   };
   const handleSkip = () => {
     setVoiceNotice(undefined);

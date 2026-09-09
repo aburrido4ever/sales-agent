@@ -39,6 +39,7 @@ Formato de cada requerimiento funcional: `RF-<módulo>-<n>`, con una frase de cr
 | 09 | [Salesforce writeback, sincronización y modo offline](09-salesforce-writeback-sincronizacion-y-modo-offline.md) | Escritura a CRM, cola offline, reconciliación |
 | 10 | [Notificaciones y empaquetado móvil](10-notificaciones-y-empaquetado-movil.md) | Push/local notifications, Capacitor, tokens de dispositivo |
 | 11 | [Auditoría de cobertura](11-auditoria-de-cobertura.md) | Verificación RF-XX por RF-XX contra el código real — qué está hecho, parcial, o ausente |
+| 12 | [Agente de IA real para AISA](12-agente-ia-real-para-aisa.md) | Reemplazo del mock de AISA por Claude real: modelo, prompt/contexto, cuota, arquitectura de servicio, despliegue — manteniendo alcance de demo |
 
 ## Notas transversales (aplican a más de un módulo)
 

@@ -3,7 +3,7 @@ import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { AlertCircle, Bot, CheckCircle2, ChevronLeft, ChevronRight, Circle, ClipboardCheck, LoaderCircle, Mic, MicOff, Sparkles } from 'lucide-solid';
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js';
 import { getVisitAccount } from '../selectors';
-import { buildDebriefTransitionCopy, buildSimulatedObjectiveAnswer, cancelSpeech, combineDebriefText, evaluateVisitObjectives, matchVoiceNavigationCommand, speakText } from '../services';
+import { SILENCE_ADVANCE_MS, buildDebriefTransitionCopy, buildSimulatedObjectiveAnswer, cancelSpeech, combineDebriefText, evaluateVisitObjectives, matchVoiceNavigationCommand, speakText } from '../services';
 import { actions, state } from '../store';
 import type { VoiceNavigationCommand } from '../services';
 import type { SpeechRecognitionCtorWindow, SpeechRecognitionLike, SpeechRecognitionResultEventLike } from '../types';
@@ -63,6 +63,13 @@ function QuestionnaireStepper() {
   let nativeStateListener: PluginListenerHandle | undefined;
   const aiTimers: ReturnType<typeof setTimeout>[] = [];
   const transitionTimers: ReturnType<typeof setTimeout>[] = [];
+  let turnTranscript = '';
+  let silenceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearSilenceTimer = () => {
+    if (silenceTimer) clearTimeout(silenceTimer);
+    silenceTimer = undefined;
+  };
 
   const clearAiTimers = () => {
     aiTimers.forEach((timer) => clearTimeout(timer));
@@ -115,12 +122,37 @@ function QuestionnaireStepper() {
     }
     appendAnswerText(text);
   };
+  /**
+   * Fires after `SILENCE_ADVANCE_MS` of no new speech — the rep no longer has to say
+   * "next"/"finish" out loud; a natural pause is the cue to continue, same as talking to a person.
+   */
+  const commitSpokenTurn = () => {
+    clearSilenceTimer();
+    const text = (turnTranscript || interimTranscript()).trim();
+    turnTranscript = '';
+    setInterimTranscript('');
+    if (!text) return;
+    stopVoiceCapture();
+    const command = matchVoiceNavigationCommand(text);
+    if (command) {
+      handleVoiceCommand(command);
+      return;
+    }
+    appendAnswerText(text);
+    handleNext();
+  };
+  const scheduleSilenceCommit = () => {
+    clearSilenceTimer();
+    silenceTimer = setTimeout(commitSpokenTurn, SILENCE_ADVANCE_MS);
+  };
 
   const clearNativeListeners = () => {
     void nativeStateListener?.remove().catch(() => undefined);
     nativeStateListener = undefined;
   };
   const stopVoiceCapture = () => {
+    clearSilenceTimer();
+    turnTranscript = '';
     setIsListening(false);
     recognition?.stop?.();
     recognition = undefined;
@@ -176,7 +208,7 @@ function QuestionnaireStepper() {
         maxResults: 5,
         partialResults: false,
         popup: false,
-        prompt: 'Answer the question, or say next, previous, or finish.',
+        prompt: "Answer the question — I'll continue automatically. Say previous or finish to override.",
       });
       const bestFinalMatch = result.matches?.find((match) => match.trim());
       if (bestFinalMatch) {
@@ -224,7 +256,8 @@ function QuestionnaireStepper() {
       }
 
       setInterimTranscript(interim);
-      if (finalTranscript) handleCapturedSpeech(finalTranscript);
+      if (finalTranscript) turnTranscript = `${turnTranscript}${turnTranscript ? ' ' : ''}${finalTranscript}`;
+      if (finalTranscript || interim) scheduleSilenceCommit();
     };
     recognition.onerror = () => {
       stopVoiceCapture();

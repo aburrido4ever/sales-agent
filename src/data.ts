@@ -44,6 +44,25 @@ export const accounts: Account[] = [
     engagementRisk: 'Low',
     nextAction: 'Confirm decision timeline',
     isNearbyCandidate: true,
+    creditHold: {
+      amount: 2100,
+      overdueDays: 30,
+      invoiceReason: 'Invoice from May 18th for the pilot route-optimization license renewal is still open in accounts receivable.',
+    },
+    externalSignals: [
+      {
+        id: 'signal-acme-1',
+        source: 'LinkedIn',
+        summary: 'Acme Corporation posted openings for three new regional distribution managers.',
+        detectedAt: '2026-06-08',
+      },
+      {
+        id: 'signal-acme-2',
+        source: 'Trade press',
+        summary: 'Acme Corporation announced a new distribution hub opening in San Antonio.',
+        detectedAt: '2026-06-11',
+      },
+    ],
   },
   {
     id: 'acct-globex',
@@ -62,6 +81,25 @@ export const accounts: Account[] = [
     nextAction: 'Review CFO approval path',
     isNearbyCandidate: true,
     hasEscalation: true,
+    creditHold: {
+      amount: 6800,
+      overdueDays: 60,
+      invoiceReason: 'Invoice from April for the field CRM implementation services retainer was disputed and never resolved.',
+    },
+    externalSignals: [
+      {
+        id: 'signal-globex-1',
+        source: 'LinkedIn',
+        summary: 'Globex Manufacturing hired a new VP of Digital Transformation.',
+        detectedAt: '2026-05-30',
+      },
+      {
+        id: 'signal-globex-2',
+        source: 'Trade press',
+        summary: 'Globex Manufacturing announced a $12M plant automation investment.',
+        detectedAt: '2026-06-02',
+      },
+    ],
   },
   {
     id: 'acct-initech',
@@ -79,6 +117,25 @@ export const accounts: Account[] = [
     engagementRisk: 'Low',
     nextAction: 'Schedule onboarding',
     isNearbyCandidate: true,
+    creditHold: {
+      amount: 1500,
+      overdueDays: 21,
+      invoiceReason: 'Invoice from May 20th for the automation add-on training package is still outstanding.',
+    },
+    externalSignals: [
+      {
+        id: 'signal-initech-1',
+        source: 'LinkedIn',
+        summary: 'Initech Solutions promoted their Head of Customer Success to VP.',
+        detectedAt: '2026-06-05',
+      },
+      {
+        id: 'signal-initech-2',
+        source: 'Trade press',
+        summary: 'Initech Solutions was named a finalist for the Austin Tech Innovation Award.',
+        detectedAt: '2026-06-09',
+      },
+    ],
   },
   {
     id: 'acct-horizon',
@@ -96,6 +153,25 @@ export const accounts: Account[] = [
     engagementRisk: 'Medium',
     nextAction: 'Follow up on proposal economics',
     isNearbyCandidate: true,
+    creditHold: {
+      amount: 3100,
+      overdueDays: 38,
+      invoiceReason: 'Invoice from April 22nd for the site analytics pilot deployment has not been settled.',
+    },
+    externalSignals: [
+      {
+        id: 'signal-horizon-1',
+        source: 'LinkedIn',
+        summary: 'Horizon Builders hired a new Director of Field Operations.',
+        detectedAt: '2026-05-26',
+      },
+      {
+        id: 'signal-horizon-2',
+        source: 'Trade press',
+        summary: 'Horizon Builders broke ground on the Mueller District mixed-use project.',
+        detectedAt: '2026-05-30',
+      },
+    ],
   },
   {
     id: 'acct-northstar',
@@ -113,40 +189,59 @@ export const accounts: Account[] = [
     engagementRisk: 'Medium',
     nextAction: 'Confirm renewal stakeholders',
     isNearbyCandidate: true,
+    creditHold: {
+      amount: 5400,
+      overdueDays: 52,
+      invoiceReason: 'Invoice from March for a bulk medical supply restocking order is past due pending purchasing approval.',
+    },
+    externalSignals: [
+      {
+        id: 'signal-northstar-1',
+        source: 'LinkedIn',
+        summary: 'Northstar Medical Supply hired two new regional account managers.',
+        detectedAt: '2026-05-27',
+      },
+      {
+        id: 'signal-northstar-2',
+        source: 'Trade press',
+        summary: 'Northstar Medical Supply expanded distribution to three new hospital networks.',
+        detectedAt: '2026-06-03',
+      },
+    ],
   },
   {
     id: 'acct-urban-foods',
-    name: 'Urban Foods Group',
-    industry: 'Food Service',
+    name: 'Apex Construction',
+    industry: 'Commercial Construction',
     address: '1500 Barton Springs Rd, Austin, TX',
     latitude: 30.2624,
     longitude: -97.7617,
-    summary: 'Multi-location operator with a stalled expansion discussion.',
+    summary: 'Commercial contractor with a fleet management contract upgrade stuck at proposal stage.',
     status: 'Needs follow-up',
-    risks: ['No response after pricing discussion'],
-    type: 'Food service operator',
+    risks: ['Credit hold is blocking new equipment orders'],
+    type: 'Commercial contractor',
     tier: 'Growth',
     lastInteractionDate: '2026-05-20',
     engagementRisk: 'High',
-    nextAction: 'Recover pricing discussion',
+    nextAction: 'Get the credit hold released and confirm the fleet contract decision date',
     isNearbyCandidate: true,
     hasEscalation: true,
     creditHold: {
-      amount: 18400,
-      overdueDays: 47,
-      invoiceReason: 'Two invoices from the March multi-site order were never settled after the discount dispute.',
+      amount: 4200,
+      overdueDays: 45,
+      invoiceReason: 'Invoice from July 5th for a bulk order of HST3 expansion anchors and chemical sealants delivered to the Downtown Plaza project was never settled.',
     },
     externalSignals: [
       {
         id: 'signal-urban-foods-1',
         source: 'LinkedIn',
-        summary: 'Urban Foods Group posted three kitchen operations roles for two unannounced locations.',
+        summary: 'Apex Construction hired two new project superintendents this week.',
         detectedAt: '2026-05-28',
       },
       {
         id: 'signal-urban-foods-2',
         source: 'Trade press',
-        summary: 'Regional food service outlet reported Urban Foods Group shortlisted for a municipal catering tender.',
+        summary: 'Apex Construction won the bid for the Riverfront High School expansion.',
         detectedAt: '2026-06-02',
       },
     ],
@@ -167,6 +262,25 @@ export const accounts: Account[] = [
     engagementRisk: 'Low',
     nextAction: 'Share benchmark deck',
     isNearbyCandidate: true,
+    creditHold: {
+      amount: 980,
+      overdueDays: 15,
+      invoiceReason: 'Invoice from June 1st for the workflow benchmark engagement fee is still open.',
+    },
+    externalSignals: [
+      {
+        id: 'signal-atlas-1',
+        source: 'LinkedIn',
+        summary: 'Atlas Logistics hired a new Director of Fleet Operations.',
+        detectedAt: '2026-06-04',
+      },
+      {
+        id: 'signal-atlas-2',
+        source: 'Trade press',
+        summary: 'Atlas Logistics announced a new regional distribution partnership.',
+        detectedAt: '2026-06-07',
+      },
+    ],
   },
   {
     id: 'acct-pinnacle',
@@ -184,6 +298,25 @@ export const accounts: Account[] = [
     engagementRisk: 'Medium',
     nextAction: 'Book executive sponsor call',
     isNearbyCandidate: true,
+    creditHold: {
+      amount: 2600,
+      overdueDays: 33,
+      invoiceReason: 'Invoice from May 15th for the Q2 vendor evaluation services fee remains unpaid.',
+    },
+    externalSignals: [
+      {
+        id: 'signal-pinnacle-1',
+        source: 'LinkedIn',
+        summary: 'Pinnacle Retail Partners hired a new Chief Merchandising Officer.',
+        detectedAt: '2026-05-31',
+      },
+      {
+        id: 'signal-pinnacle-2',
+        source: 'Trade press',
+        summary: 'Pinnacle Retail Partners announced a Q3 store rollout across five new markets.',
+        detectedAt: '2026-06-04',
+      },
+    ],
   },
 ];
 
@@ -470,13 +603,21 @@ export const territoryMetrics: TerritoryMetric[] = [
 
 export const contacts: Contact[] = [
   { id: 'ct-1', accountId: 'acct-acme', name: 'Mariana Torres', role: 'Sales Director', phone: '+1 512 555 1200', email: 'mariana@acme.example' },
+  { id: 'ct-10', accountId: 'acct-acme', name: 'Derek Chan', role: 'VP Supply Chain', phone: '+1 512 555 1201', email: 'derek.chan@acme.example' },
   { id: 'ct-2', accountId: 'acct-globex', name: 'Javier Morales', role: 'Operations VP', phone: '+1 512 555 1300', email: 'javier@globex.example' },
+  { id: 'ct-11', accountId: 'acct-globex', name: 'Priya Nair', role: 'Chief Financial Officer', phone: '+1 512 555 1301', email: 'priya.nair@globex.example' },
   { id: 'ct-3', accountId: 'acct-initech', name: 'Lucia Ramos', role: 'Customer Success Lead', phone: '+1 512 555 1400', email: 'lucia@initech.example' },
+  { id: 'ct-12', accountId: 'acct-initech', name: 'Marcus Bell', role: 'IT Director', phone: '+1 512 555 1401', email: 'marcus.bell@initech.example' },
   { id: 'ct-4', accountId: 'acct-horizon', name: 'Andres Valdez', role: 'Commercial Director', phone: '+1 512 555 1500', email: 'andres@horizon.example' },
+  { id: 'ct-13', accountId: 'acct-horizon', name: 'Talia Brooks', role: 'VP Construction Operations', phone: '+1 512 555 1501', email: 'talia.brooks@horizon.example' },
   { id: 'ct-5', accountId: 'acct-northstar', name: 'Camila Ortega', role: 'Procurement Lead', phone: '+1 512 555 1600', email: 'camila@northstar.example' },
-  { id: 'ct-6', accountId: 'acct-urban-foods', name: 'Sergio Ibarra', role: 'Operations Manager', phone: '+1 512 555 1700', email: 'sergio@urbanfoods.example' },
+  { id: 'ct-14', accountId: 'acct-northstar', name: 'Grace Adeyemi', role: 'VP Procurement', phone: '+1 512 555 1601', email: 'grace.adeyemi@northstar.example' },
+  { id: 'ct-6', accountId: 'acct-urban-foods', name: 'Sarah Jenkins', role: 'Lead Project Manager', phone: '+1 512 555 1700', email: 'sarah.jenkins@apexconstruction.example' },
+  { id: 'ct-9', accountId: 'acct-urban-foods', name: 'David Cho', role: 'Regional Operations Director', phone: '+1 512 555 1701', email: 'david.cho@apexconstruction.example' },
   { id: 'ct-7', accountId: 'acct-atlas', name: 'Renata Cruz', role: 'VP Operations', phone: '+1 512 555 1800', email: 'renata@atlas.example' },
+  { id: 'ct-15', accountId: 'acct-atlas', name: 'Owen Park', role: 'Fleet Operations Director', phone: '+1 512 555 1801', email: 'owen.park@atlas.example' },
   { id: 'ct-8', accountId: 'acct-pinnacle', name: 'Diego Flores', role: 'Buying Director', phone: '+1 512 555 1900', email: 'diego@pinnacle.example' },
+  { id: 'ct-16', accountId: 'acct-pinnacle', name: 'Nadia Reyes', role: 'VP Merchandising', phone: '+1 512 555 1901', email: 'nadia.reyes@pinnacle.example' },
 ];
 
 export const opportunities: Opportunity[] = [
@@ -485,7 +626,7 @@ export const opportunities: Opportunity[] = [
   { id: 'opp-3', accountId: 'acct-initech', name: 'Service Automation Add-on', stage: 'Closed Won', amount: 26000, probability: 100, nextStep: 'Schedule onboarding' },
   { id: 'opp-4', accountId: 'acct-horizon', name: 'Field Sales Visibility Rollout', stage: 'Proposal', amount: 85000, probability: 50, nextStep: 'Send revised ROI scenario' },
   { id: 'opp-5', accountId: 'acct-northstar', name: 'Coverage Analytics Renewal', stage: 'Negotiation', amount: 62000, probability: 65, nextStep: 'Align renewal stakeholders' },
-  { id: 'opp-6', accountId: 'acct-urban-foods', name: 'Multi-site Expansion', stage: 'Pricing', amount: 54000, probability: 40, nextStep: 'Recover decision criteria' },
+  { id: 'opp-6', accountId: 'acct-urban-foods', name: 'Fleet Management Contract Upgrade', stage: 'Proposal', amount: 54000, probability: 40, nextStep: 'Confirm decision date with David Cho' },
   { id: 'opp-7', accountId: 'acct-atlas', name: 'Operations Workflow Pilot', stage: 'Discovery', amount: 31000, probability: 30, nextStep: 'Share benchmark deck' },
   { id: 'opp-8', accountId: 'acct-pinnacle', name: 'Retail Execution Platform', stage: 'Evaluation', amount: 97000, probability: 45, nextStep: 'Book executive sponsor call' },
 ];
@@ -507,14 +648,14 @@ export const activities: ActivityEvent[] = [
   { id: 'act-3', accountId: 'acct-initech', title: 'Implementation check-in', date: '2026-05-09', notes: 'Team requested follow-up automation.' },
   { id: 'act-4', accountId: 'acct-horizon', title: 'Proposal review', date: '2026-05-24', notes: 'Requested ROI scenario for regional rollout.' },
   { id: 'act-5', accountId: 'acct-northstar', title: 'Renewal call', date: '2026-06-01', notes: 'Procurement wants stakeholder map before renewal review.' },
-  { id: 'act-6', accountId: 'acct-urban-foods', title: 'Pricing discussion', date: '2026-05-20', notes: 'Decision stalled after discount request.' },
+  { id: 'act-6', accountId: 'acct-urban-foods', title: 'TE 70-ATC Combihammer field demo', date: '2026-05-20', notes: 'Ran a field demo of the TE 70-ATC Combihammer for Sarah Jenkins; awaiting her crew feedback.' },
   { id: 'act-7', accountId: 'acct-atlas', title: 'Operations discovery', date: '2026-06-06', notes: 'Asked for comparison against manual reporting.' },
   { id: 'act-8', accountId: 'acct-pinnacle', title: 'Vendor evaluation', date: '2026-05-29', notes: 'Executive sponsor is not yet identified.' },
 ];
 
 export const initialTasks: Task[] = [
   { id: 'task-demo-1', accountId: 'acct-horizon', title: 'Send revised ROI scenario', dueDate: '2026-06-10', owner: 'Sofia Rivera', status: 'Open', priority: 'High', source: 'demo' },
-  { id: 'task-demo-2', accountId: 'acct-urban-foods', title: 'Recover pricing discussion', dueDate: '2026-06-07', owner: 'Sofia Rivera', status: 'Open', priority: 'High', source: 'demo' },
+  { id: 'task-demo-2', accountId: 'acct-urban-foods', title: 'Confirm fleet contract decision date with David Cho', dueDate: '2026-06-07', owner: 'Sofia Rivera', status: 'Open', priority: 'High', source: 'demo' },
   { id: 'task-demo-3', accountId: 'acct-northstar', title: 'Confirm renewal stakeholders', dueDate: '2026-06-17', owner: 'Sofia Rivera', status: 'Open', priority: 'Medium', source: 'demo' },
   { id: 'task-demo-4', accountId: 'acct-pinnacle', title: 'Book executive sponsor call', dueDate: '2026-06-14', owner: 'Sofia Rivera', status: 'Open', priority: 'High', source: 'demo' },
 ];

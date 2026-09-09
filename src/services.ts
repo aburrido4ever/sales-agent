@@ -200,6 +200,32 @@ export const buildRecommendationMessage = (
   return `You have a route gap nearby. ${account.name} is ${eta} minutes away and has a clear next action.`;
 };
 
+/**
+ * The 3 base questions always apply; `billing`/`decision-maker` are appended only when the
+ * account has the matching data, in this fixed order. `buildSimulatedBriefingReply` mirrors this
+ * exact same conditional order so its positional-index dispatch (see its doc comment) stays
+ * aligned without re-deriving the condition logic from question text.
+ */
+const buildBriefingSuggestedQuestions = (
+  account: Account,
+  opportunity: Opportunity | undefined,
+  contacts: Contact[],
+): string[] => {
+  const questions = [
+    `What changed since the last ${account.status.toLowerCase()} conversation?`,
+    opportunity ? `Is ${opportunity.name} still in ${opportunity.stage}?` : 'Is there a new commercial opportunity to capture?',
+    account.nextAction ? `Can we confirm the next action: ${account.nextAction}?` : 'What follow-up should be created after this visit?',
+  ];
+  if (account.creditHold) {
+    questions.push(`What exactly was that ${formatCurrency(account.creditHold.amount)} overdue invoice for?`);
+  }
+  const decisionMakerContact = contacts[1];
+  if (decisionMakerContact) {
+    questions.push(`Do we know who signs off on this — is ${decisionMakerContact.name} still the decision-maker?`);
+  }
+  return questions;
+};
+
 export const buildPreMeetingBriefing = (
   visit: ScheduledVisit,
   account: Account,
@@ -233,11 +259,7 @@ export const buildPreMeetingBriefing = (
     recentTopics: recentTopics.length ? recentTopics : ['No recent activity logged. Confirm current priorities.'],
     openTaskIds: openTasks.map((task) => task.id),
     blockers,
-    suggestedQuestions: [
-      `What changed since the last ${account.status.toLowerCase()} conversation?`,
-      opportunity ? `Is ${opportunity.name} still in ${opportunity.stage}?` : 'Is there a new commercial opportunity to capture?',
-      account.nextAction ? `Can we confirm the next action: ${account.nextAction}?` : 'What follow-up should be created after this visit?',
-    ],
+    suggestedQuestions: buildBriefingSuggestedQuestions(account, opportunity, contacts),
     keyContactIds: contacts.slice(0, 2).map((contact) => contact.id),
     opportunitySummary: opportunity
       ? `${opportunity.name} is in ${opportunity.stage} at ${opportunity.probability}% with ${formatCurrency(opportunity.amount)} in pipeline.`
@@ -296,10 +318,11 @@ export const buildVisitObjectives = (
   }
 
   if (account.externalSignals && account.externalSignals.length > 0) {
+    const [firstSignal, ...remainingSignals] = account.externalSignals;
     items.push({
       id: 'external-signal',
       label: 'Validate external intel',
-      detail: `Confirm what you are hearing against the ${account.externalSignals.length} outside item(s) we picked up, starting with ${account.externalSignals[0].source}.`,
+      detail: `${firstSignal.source}: ${firstSignal.summary}${remainingSignals.length ? ` (+${remainingSignals.length} more)` : ''}.`,
     });
   }
 
@@ -325,6 +348,7 @@ export const buildSimulatedBriefingReply = (
   questionIndex: number,
   account: Account,
   opportunity: Opportunity | undefined,
+  contacts: Contact[] = [],
 ): string => {
   if (questionIndex === 0) {
     return `Their priorities shifted this quarter. Nothing is in the CRM yet, but ${account.name} wants us back in front of their leadership.`;
@@ -340,6 +364,20 @@ export const buildSimulatedBriefingReply = (
     return account.nextAction
       ? `Confirmed. We agreed on ${account.nextAction}, and I am the owner.`
       : `We agreed I send a recap this week and book the next session.`;
+  }
+
+  // Mirrors buildBriefingSuggestedQuestions's append order exactly: billing (if present), then
+  // decision-maker (if present) — whichever conditions are true determine what index 3/4 mean.
+  let nextIndex = 3;
+  if (account.creditHold) {
+    if (questionIndex === nextIndex) return account.creditHold.invoiceReason;
+    nextIndex += 1;
+  }
+  const decisionMakerContact = contacts[1];
+  if (decisionMakerContact) {
+    if (questionIndex === nextIndex) {
+      return `Confirmed — ${decisionMakerContact.name}, the ${decisionMakerContact.role}, has to sign off on this.`;
+    }
   }
 
   return `They confirmed the current plan and had no additional concerns on this point.`;
@@ -701,24 +739,60 @@ export const interpretVisitAnswers = (
   };
 };
 
-export const speakText = (text: string, lang = 'en-US', onEnd?: () => void) => {
-  if (Capacitor.isNativePlatform()) {
-    void TextToSpeech.stop()
-      .catch(() => undefined)
-      .then(() => TextToSpeech.speak({
-        text,
-        lang,
-        rate: 0.96,
-        pitch: 1,
-        volume: 1,
-        category: 'playback',
-        queueStrategy: QueueStrategy.Flush,
-      }))
-      .catch(() => undefined)
-      .then(() => onEnd?.());
-    return true;
-  }
+// ElevenLabs default public voice ("Rachel") — used when VITE_ELEVENLABS_VOICE_ID is not set.
+const ELEVENLABS_DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
+const ELEVENLABS_API_KEY = (import.meta.env.VITE_ELEVENLABS_API_KEY as string | undefined)?.trim();
+const ELEVENLABS_VOICE_ID = (import.meta.env.VITE_ELEVENLABS_VOICE_ID as string | undefined)?.trim() || ELEVENLABS_DEFAULT_VOICE_ID;
 
+/**
+ * Demo-only: called directly from the browser with a client-exposed key (see RQ-12 §4 — the
+ * production path routes AI/TTS calls through the backend; this shortcut is scoped to getting a
+ * natural voice in front of a presentation quickly and should not be treated as the target
+ * architecture).
+ */
+let elevenLabsAudio: HTMLAudioElement | undefined;
+
+const speakWithElevenLabs = async (text: string, onEnd?: () => void): Promise<boolean> => {
+  if (!ELEVENLABS_API_KEY) return false;
+  try {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': ELEVENLABS_API_KEY,
+        'Content-Type': 'application/json',
+        Accept: 'audio/mpeg',
+      },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+    if (!response.ok) return false;
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    if (elevenLabsAudio) {
+      elevenLabsAudio.pause();
+      elevenLabsAudio.currentTime = 0;
+    }
+    const audio = new Audio(url);
+    elevenLabsAudio = audio;
+    const finish = () => {
+      URL.revokeObjectURL(url);
+      if (elevenLabsAudio === audio) elevenLabsAudio = undefined;
+      onEnd?.();
+    };
+    audio.onended = finish;
+    audio.onerror = finish;
+    await audio.play();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const speakWithWebSpeech = (text: string, lang: string, onEnd?: () => void) => {
   if (!('speechSynthesis' in globalThis) || !('SpeechSynthesisUtterance' in globalThis)) return false;
   const synth = globalThis.speechSynthesis;
   const speak = () => {
@@ -750,7 +824,40 @@ export const speakText = (text: string, lang = 'en-US', onEnd?: () => void) => {
   return true;
 };
 
+export const speakText = (text: string, lang = 'en-US', onEnd?: () => void) => {
+  if (Capacitor.isNativePlatform()) {
+    void TextToSpeech.stop()
+      .catch(() => undefined)
+      .then(() => TextToSpeech.speak({
+        text,
+        lang,
+        rate: 0.96,
+        pitch: 1,
+        volume: 1,
+        category: 'playback',
+        queueStrategy: QueueStrategy.Flush,
+      }))
+      .catch(() => undefined)
+      .then(() => onEnd?.());
+    return true;
+  }
+
+  if (ELEVENLABS_API_KEY) {
+    void speakWithElevenLabs(text, onEnd).then((spoke) => {
+      if (!spoke) speakWithWebSpeech(text, lang, onEnd);
+    });
+    return true;
+  }
+
+  return speakWithWebSpeech(text, lang, onEnd);
+};
+
 export const cancelSpeech = () => {
+  if (elevenLabsAudio) {
+    elevenLabsAudio.pause();
+    elevenLabsAudio.currentTime = 0;
+    elevenLabsAudio = undefined;
+  }
   if (Capacitor.isNativePlatform()) {
     void TextToSpeech.stop().catch(() => undefined);
     return;
@@ -761,6 +868,7 @@ export const cancelSpeech = () => {
 };
 
 export const pauseSpeech = () => {
+  elevenLabsAudio?.pause();
   if (Capacitor.isNativePlatform()) {
     void TextToSpeech.stop().catch(() => undefined);
     return;
@@ -771,8 +879,16 @@ export const pauseSpeech = () => {
 };
 
 export const resumeSpeech = () => {
+  if (elevenLabsAudio) {
+    void elevenLabsAudio.play().catch(() => undefined);
+    return;
+  }
   if (Capacitor.isNativePlatform()) return;
 
   if (!('speechSynthesis' in globalThis)) return;
   globalThis.speechSynthesis.resume();
 };
+
+/** Pause in continuous voice capture, in ms, treated as "the rep is done talking" — no explicit
+ * "next"/"finish" command needed; mirrors a natural conversational turn-taking pause. */
+export const SILENCE_ADVANCE_MS = 1500;

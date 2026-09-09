@@ -2,7 +2,7 @@ import { useNavigate } from '@solidjs/router';
 import { Bot, Mic, X } from 'lucide-solid';
 import { Show } from 'solid-js';
 import AisaBriefingDialog from './AisaBriefingDialog';
-import { getAccountOpportunity, getVisitAccount } from '../selectors';
+import { getAccountContacts, getAccountOpportunity, getVisitAccount } from '../selectors';
 import { actions, state } from '../store';
 
 function AssistantNotificationSheet() {
@@ -64,6 +64,7 @@ function AssistantNotificationSheet() {
                     briefing={activeBriefing()}
                     account={activeAccount()}
                     opportunity={getAccountOpportunity(activeAccount().id)}
+                    contacts={getAccountContacts(activeAccount().id)}
                     onEndBriefing={() => actions.clearAssistantNotification()}
                     onSimulateApproach={() => actions.startClientDestinationDemo(activeAccount().id)}
                   />
