@@ -233,6 +233,14 @@ export type InterviewQuestion = {
   order: number;
   category: QuestionCategory;
   answerType: AnswerType;
+  /**
+   * `objective` — one of the fixed visit objectives from `buildVisitObjectives`.
+   * `ai-followup` — an extra question AISA generated because the answer to `objectiveId` left a
+   * gap. Follow-ups never add an objective; they drill into one that already exists.
+   */
+  source?: 'objective' | 'ai-followup';
+  /** The visit objective this question serves. Equals `id` for `source: 'objective'`. */
+  objectiveId?: string;
 };
 
 export type LocationPoint = {

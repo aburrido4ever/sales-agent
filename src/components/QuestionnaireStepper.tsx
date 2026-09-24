@@ -2,11 +2,12 @@ import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { AlertCircle, Bot, CheckCircle2, ChevronLeft, ChevronRight, Circle, ClipboardCheck, LoaderCircle, Mic, MicOff, Sparkles } from 'lucide-solid';
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js';
+import { assessObjectives, askDebriefQuestion, buildAisaContext, isAiEnabled, type DebriefTurn } from '../ai/aisa';
 import { getVisitAccount } from '../selectors';
-import { SILENCE_ADVANCE_MS, buildDebriefTransitionCopy, buildSimulatedObjectiveAnswer, cancelSpeech, combineDebriefText, evaluateVisitObjectives, matchVoiceNavigationCommand, speakText } from '../services';
+import { SILENCE_ADVANCE_MS, buildDebriefTransitionCopy, buildSimulatedObjectiveAnswer, buildVisitObjectives, cancelSpeech, combineDebriefText, evaluateVisitObjectives, matchVoiceNavigationCommand, speakText } from '../services';
 import { actions, state } from '../store';
 import type { VoiceNavigationCommand } from '../services';
-import type { SpeechRecognitionCtorWindow, SpeechRecognitionLike, SpeechRecognitionResultEventLike } from '../types';
+import type { InterviewQuestion, SpeechRecognitionCtorWindow, SpeechRecognitionLike, SpeechRecognitionResultEventLike, VisitObjectiveAssessment } from '../types';
 
 const aiReviewSteps = [
   'Reading captured conversation',
@@ -41,15 +42,61 @@ function QuestionnaireStepper() {
   const answer = () => state.questionnaire.answers[activeQuestion()?.id ?? ''] ?? '';
   const hasAnyAnswer = () => Object.values(state.questionnaire.answers).some((value) => value.trim());
 
+  /**
+   * AI path: statuses come from `assessObjectives` (the model reads the transcript).
+   * Mock path: the original keyword matching. Never mixed — see `assessObjectives`' doc comment
+   * for why a model-written prompt breaks the keyword namespace `services.ts` relies on.
+   */
+  const [aiObjectives, setAiObjectives] = createSignal<VisitObjectiveAssessment[] | undefined>(undefined);
+  const aiMode = () => isAiEnabled();
+
   const objectives = createMemo(() => {
     const currentAccount = account();
     if (!currentAccount) return [];
+    const scored = aiObjectives();
+    if (aiMode() && scored?.length) return scored;
+    if (aiMode()) {
+      // Before the first answer there is nothing to score — show the agenda as untouched.
+      return buildVisitObjectives(currentAccount, opportunity()).map((objective) => ({
+        ...objective,
+        status: 'missed' as const,
+        evidence: 'Not covered in the debrief yet.',
+      }));
+    }
     return evaluateVisitObjectives(
       combineDebriefText(snapshot(), state.questionnaire.answers),
       currentAccount,
       opportunity(),
     );
   });
+
+  /** The CRM slice AISA is allowed to speak from. Rebuilt whenever the visit's account changes. */
+  const aisaContext = createMemo(() => {
+    const currentAccount = account();
+    if (!currentAccount) return undefined;
+    return buildAisaContext({
+      account: currentAccount,
+      contacts: state.crm.contacts.filter((contact) => contact.accountId === currentAccount.id),
+      opportunity: opportunity(),
+      tasks: state.crm.tasks.filter((task) => task.accountId === currentAccount.id),
+      activities: state.crm.activities.filter((activity) => activity.accountId === currentAccount.id),
+      objectives: buildVisitObjectives(currentAccount, opportunity()),
+    });
+  });
+
+  /** What AISA and the rep have actually said so far — the model's only memory of the debrief. */
+  const debriefTranscript = (): DebriefTurn[] =>
+    snapshot()
+      .map((question) => ({ question: question.prompt, answer: (state.questionnaire.answers[question.id] ?? '').trim() }))
+      .filter((turn) => turn.answer);
+
+  const objectiveIdOf = (question: InterviewQuestion) => question.objectiveId ?? question.id;
+
+  /** Maps a checklist row to the snapshot slot that asks about it — AI follow-ups shift indices. */
+  const questionIndexForObjective = (objectiveId: string, fallbackIndex: number) => {
+    const index = snapshot().findIndex((question) => objectiveIdOf(question) === objectiveId);
+    return index < 0 ? fallbackIndex : index;
+  };
 
   const [isListening, setIsListening] = createSignal(false);
   const [isAnalyzing, setIsAnalyzing] = createSignal(false);
@@ -58,6 +105,10 @@ function QuestionnaireStepper() {
   const [isVoiceDisabled, setIsVoiceDisabled] = createSignal(false);
   const [transitionCopy, setTransitionCopy] = createSignal<string | undefined>(undefined);
   const [isTransitioning, setIsTransitioning] = createSignal(false);
+  /** True while a model call is in flight, so the mic stays shut and the UI can say so. */
+  const [isAisaThinking, setIsAisaThinking] = createSignal(false);
+  /** Question ids AISA has already phrased, so re-entering a question does not re-ask the model. */
+  const phrasedQuestionIds = new Set<string>();
   let recognition: SpeechRecognitionLike | undefined;
   let nativeListening = false;
   let nativeStateListener: PluginListenerHandle | undefined;
@@ -284,7 +335,7 @@ function QuestionnaireStepper() {
     actions.updateAnswer(question.id, buildSimulatedObjectiveAnswer(question.id, currentAccount, opportunity()));
     actions.showToast('Simulated answer captured.');
   };
-  const startAiReview = () => {
+  const startAiReview = (precomputed?: VisitObjectiveAssessment[]) => {
     if (isAnalyzing() || !hasAnyAnswer()) {
       if (!hasAnyAnswer()) actions.showToast('Answer at least one question before finishing.');
       return;
@@ -299,19 +350,112 @@ function QuestionnaireStepper() {
     aiReviewSteps.slice(1).forEach((_, index) => {
       aiTimers.push(setTimeout(() => setAiStepIndex(index + 1), 720 * (index + 1)));
     });
-    aiTimers.push(setTimeout(() => {
-      actions.buildReview();
+
+    // The mock path keeps its scripted 720ms-per-step pacing; the AI path scores the transcript
+    // for real and lands whenever the model answers, using the last assessment as the floor.
+    const finish = (assessment?: VisitObjectiveAssessment[]) => {
+      actions.buildReview(assessment);
       clearAiTimers();
-    }, 720 * aiReviewSteps.length));
+    };
+
+    if (!aiMode()) {
+      aiTimers.push(setTimeout(() => finish(), 720 * aiReviewSteps.length));
+      return;
+    }
+
+    const context = aisaContext();
+    const currentAccount = account();
+    if (precomputed?.length || !context || !currentAccount) {
+      aiTimers.push(setTimeout(() => finish(precomputed), 720 * aiReviewSteps.length));
+      return;
+    }
+    void assessObjectives(context, debriefTranscript(), {
+      account: currentAccount,
+      opportunity: opportunity(),
+      questions: snapshot(),
+      answers: state.questionnaire.answers,
+    }).then((assessment) => {
+      setAiObjectives(assessment);
+      finish(assessment);
+    });
   };
+  /**
+   * The AI debrief turn: score what the rep just said, and if the objective is still short, have
+   * AISA drill into it instead of moving on — the script's "did she give you a timeline?" beat.
+   * A follow-up is inserted at most once per objective so a vague rep can never loop the demo.
+   */
+  const handleAiNext = async (question: InterviewQuestion, currentAccount: NonNullable<ReturnType<typeof account>>) => {
+    const context = aisaContext();
+    if (!context) {
+      actions.nextQuestion();
+      return;
+    }
+
+    const objectiveId = objectiveIdOf(question);
+    setTransitionCopy(buildDebriefTransitionCopy(objectiveId, currentAccount, opportunity()));
+    setIsTransitioning(true);
+    setIsAisaThinking(true);
+    stopVoiceCapture();
+
+    try {
+      const assessment = await assessObjectives(context, debriefTranscript(), {
+        account: currentAccount,
+        opportunity: opportunity(),
+        questions: snapshot(),
+        answers: state.questionnaire.answers,
+      });
+      setAiObjectives(assessment);
+
+      const answered = (state.questionnaire.answers[question.id] ?? '').trim();
+      const scored = assessment.find((item) => item.id === objectiveId);
+      const alreadyDrilled = snapshot().some(
+        (item) => item.source === 'ai-followup' && item.objectiveId === objectiveId,
+      );
+
+      if (answered && scored && scored.status !== 'met' && !alreadyDrilled) {
+        const prompt = await askDebriefQuestion(context, objectiveId, debriefTranscript(), {
+          isFollowUp: true,
+          fallbackPrompt: `Before we move on — ${scored.evidence.toLowerCase()} Can you fill that in?`,
+        });
+        actions.appendAiFollowUp(question.id, {
+          id: `${objectiveId}-followup`,
+          prompt,
+          isActive: true,
+          order: question.order + 1,
+          category: question.category,
+          answerType: 'text',
+          source: 'ai-followup',
+          objectiveId,
+        });
+        actions.nextQuestion();
+        return;
+      }
+
+      if (isLastQuestion()) {
+        startAiReview(assessment);
+        return;
+      }
+      actions.nextQuestion();
+    } finally {
+      setIsAisaThinking(false);
+      setIsTransitioning(false);
+      setTransitionCopy(undefined);
+    }
+  };
+
   const handleNext = () => {
+    if (isTransitioning()) return;
+    const currentAccount = account();
+    const question = activeQuestion();
+
+    if (aiMode() && currentAccount && question) {
+      void handleAiNext(question, currentAccount);
+      return;
+    }
     if (isLastQuestion()) {
       startAiReview();
       return;
     }
-    if (isTransitioning()) return;
-    const currentAccount = account();
-    const question = activeQuestion();
     if (!currentAccount || !question) {
       actions.nextQuestion();
       return;
@@ -339,10 +483,37 @@ function QuestionnaireStepper() {
       if (review() || isVoiceDisabled()) return;
       startVoiceCapture();
     };
-    if (state.questionnaire.mode === 'voice') {
-      const spoke = speakText(question.prompt, 'en-US', autoStartListening);
+    const speakPrompt = (prompt: string) => {
+      if (currentToken !== speechToken) return;
+      if (state.questionnaire.mode !== 'voice') return;
+      const spoke = speakText(prompt, 'en-US', autoStartListening);
       if (!spoke && speechSupported()) autoStartListening();
+    };
+
+    const context = aisaContext();
+    // Follow-ups arrive already worded by the model; objective questions get re-worded once, so
+    // AISA asks in its own voice instead of reading `objectiveQuestionCopy` verbatim.
+    const needsPhrasing = aiMode()
+      && context
+      && question.source !== 'ai-followup'
+      && !phrasedQuestionIds.has(question.id);
+
+    if (!needsPhrasing || !context) {
+      speakPrompt(question.prompt);
+      return;
     }
+
+    phrasedQuestionIds.add(question.id);
+    setIsAisaThinking(true);
+    void askDebriefQuestion(context, objectiveIdOf(question), debriefTranscript(), {
+      fallbackPrompt: question.prompt,
+    })
+      .then((prompt) => {
+        if (currentToken !== speechToken) return;
+        actions.setQuestionPrompt(question.id, prompt);
+        speakPrompt(prompt);
+      })
+      .finally(() => setIsAisaThinking(false));
   });
 
   onCleanup(() => {
@@ -383,6 +554,9 @@ function QuestionnaireStepper() {
               <Sparkles size={17} />
               <div>
                 <p>{copy()}</p>
+                <Show when={isAisaThinking()}>
+                  <p>Checking the objective and lining up the next question…</p>
+                </Show>
               </div>
             </div>
           )}
@@ -398,8 +572,8 @@ function QuestionnaireStepper() {
               {(item, index) => (
                 <button
                   type="button"
-                  class={`objective-review-item ${item.status}${activeQuestion()?.id === item.id ? ' active' : ''}`}
-                  onClick={() => actions.goToQuestion(index())}
+                  class={`objective-review-item ${item.status}${activeQuestion() && objectiveIdOf(activeQuestion()!) === item.id ? ' active' : ''}`}
+                  onClick={() => actions.goToQuestion(questionIndexForObjective(item.id, index()))}
                 >
                   <div class="objective-review-icon">
                     <Show
@@ -534,7 +708,7 @@ function QuestionnaireStepper() {
           </button>
         </div>
 
-        <button class="secondary-action wide" disabled={!hasAnyAnswer() || isAnalyzing() || isTransitioning()} onClick={startAiReview}>
+        <button class="secondary-action wide" disabled={!hasAnyAnswer() || isAnalyzing() || isTransitioning()} onClick={() => startAiReview()}>
           <ClipboardCheck size={18} />
           Finish debrief now
         </button>

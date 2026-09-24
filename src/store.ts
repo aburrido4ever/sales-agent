@@ -32,6 +32,7 @@ import type {
   ReviewSummary,
   SalesforceWritebackStatus,
   Task,
+  VisitObjectiveAssessment,
 } from './types';
 
 type AppState = {
@@ -1086,14 +1087,41 @@ export const actions = {
   nextVoiceQuestion() {
     actions.nextQuestion();
   },
-  buildReview() {
+  /**
+   * Replaces the spoken prompt of a question already in the snapshot. Used by the AI path so
+   * AISA can voice an objective in its own words without the objective list itself changing.
+   */
+  setQuestionPrompt(questionId: string, prompt: string) {
+    const index = state.questionnaire.snapshot.findIndex((question) => question.id === questionId);
+    if (index < 0) return;
+    setState('questionnaire', 'snapshot', index, 'prompt', prompt);
+  },
+  /**
+   * Inserts an AISA-generated follow-up directly after `afterQuestionId`. Follow-ups drill into
+   * an objective that already exists — they never introduce a new one, so the objective
+   * checklist and its progress visualization stay driven by `buildVisitObjectives`.
+   */
+  appendAiFollowUp(afterQuestionId: string, question: InterviewQuestion) {
+    if (state.questionnaire.snapshot.some((item) => item.id === question.id)) return;
+    const index = state.questionnaire.snapshot.findIndex((item) => item.id === afterQuestionId);
+    const insertAt = index < 0 ? state.questionnaire.snapshot.length : index + 1;
+    const next = [...state.questionnaire.snapshot];
+    next.splice(insertAt, 0, question);
+    setState('questionnaire', 'snapshot', next.map((item, order) => ({ ...item, order: order + 1 })));
+  },
+  /**
+   * `objectiveChecklist` is passed in only on the AI path, where `assessObjectives` scored the
+   * transcript. Omitted, the review keeps the keyword evaluation `interpretVisitAnswers` does.
+   */
+  buildReview(objectiveChecklist?: VisitObjectiveAssessment[]) {
     const visit = state.visits.find((item) => item.id === state.questionnaire.visitId);
     if (!visit) return;
     const account = state.crm.accounts.find((item) => item.id === visit.accountId);
     if (!account) return;
     const opportunity = state.crm.opportunities.find((item) => item.accountId === account.id);
     const hadReview = Boolean(state.questionnaire.review);
-    const review = interpretVisitAnswers(visit.id, account, opportunity, state.questionnaire.snapshot, state.questionnaire.answers);
+    const interpreted = interpretVisitAnswers(visit.id, account, opportunity, state.questionnaire.snapshot, state.questionnaire.answers);
+    const review = objectiveChecklist?.length ? { ...interpreted, objectiveChecklist } : interpreted;
     setState('questionnaire', 'review', review);
     if (review.extraction && !state.assistant.extractions.some((item) => item.id === review.extraction?.id)) {
       setState('assistant', 'extractions', state.assistant.extractions.length, review.extraction);

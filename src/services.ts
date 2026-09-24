@@ -550,6 +550,8 @@ export const buildObjectiveInterviewQuestions = (
       order: index + 1,
       category: copy?.category ?? 'meeting',
       answerType: 'text',
+      source: 'objective',
+      objectiveId: objective.id,
     };
   });
 

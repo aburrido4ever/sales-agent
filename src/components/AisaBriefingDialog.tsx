@@ -2,7 +2,9 @@ import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { CheckCircle2, Mic, MicOff, MessageCircleQuestion, Route, Sparkles, Target } from 'lucide-solid';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { answerRepQuestion, buildAisaContext, generateBriefingNarration, isAiEnabled, type BriefingNarration } from '../ai/aisa';
 import { SILENCE_ADVANCE_MS, buildSimulatedBriefingReply, buildVisitObjectives, cancelSpeech, matchVoiceNavigationCommand, speakText } from '../services';
+import { state } from '../store';
 import type { VoiceNavigationCommand } from '../services';
 import type { Account, Contact, Opportunity, PreMeetingBriefing, SpeechRecognitionCtorWindow, SpeechRecognitionLike, SpeechRecognitionResultEventLike } from '../types';
 
@@ -27,6 +29,11 @@ type AisaBriefingDialogProps = {
 type FollowUpExchange = {
   question: string;
   answer: string;
+  /**
+   * `aisa-asks` — AISA prepping the rep (the original mock flow: AISA's prompt, rep's reply).
+   * `rep-asks` — the script's Part 1 Q&A: the rep asks, AISA answers from the CRM.
+   */
+  direction?: 'aisa-asks' | 'rep-asks';
 };
 
 /**
@@ -68,6 +75,27 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
   const questions = () => props.briefing.suggestedQuestions;
   const currentQuestion = () => questions()[promptIndex()];
   const isLastPrompt = () => promptIndex() >= questions().length - 1;
+
+  /**
+   * With a key configured the `qa` step INVERTS: instead of AISA quizzing the rep with
+   * `suggestedQuestions`, AISA narrates the 90-day brief and then answers whatever the rep asks
+   * — which is what `docs/Script.md` Part 1 actually is. Without a key the original mock flow
+   * runs untouched.
+   */
+  const aiMode = () => isAiEnabled();
+  const [narration, setNarration] = createSignal<BriefingNarration | undefined>(undefined);
+  const [isAisaThinking, setIsAisaThinking] = createSignal(false);
+
+  const aisaContext = createMemo(() =>
+    buildAisaContext({
+      account: props.account,
+      contacts: props.contacts ?? [],
+      opportunity: props.opportunity,
+      tasks: state.crm.tasks.filter((task) => task.accountId === props.account.id),
+      activities: state.crm.activities.filter((activity) => activity.accountId === props.account.id),
+      objectives: objectives(),
+      briefing: props.briefing,
+    }));
 
   const getSpeechCtor = () =>
     (globalThis as unknown as SpeechRecognitionCtorWindow).SpeechRecognition
@@ -121,6 +149,11 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
   };
 
   const handleVoiceCommand = (command: VoiceNavigationCommand) => {
+    if (aiMode()) {
+      // There is no prompt list to step through in AI mode — only "finish" means anything.
+      if (command === 'finish') setReachedEnd(true);
+      return;
+    }
     if (command === 'previous') {
       goPrevious();
       return;
@@ -131,10 +164,33 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
     }
     setReachedEnd(true);
   };
+  /** AI mode: the rep just asked AISA something. Answer from the CRM, speak it, listen again. */
+  const handleRepQuestion = async (question: string) => {
+    setIsAisaThinking(true);
+    try {
+      const answer = await answerRepQuestion(aisaContext(), question);
+      setExchanges((current) => [...current, { question, answer, direction: 'rep-asks' }]);
+      speechToken += 1;
+      const currentToken = speechToken;
+      const listenAgain = () => {
+        if (currentToken !== speechToken || isVoiceDisabled()) return;
+        startVoiceCapture();
+      };
+      const spoke = speakText(answer, 'en-US', listenAgain);
+      if (!spoke && speechSupported()) listenAgain();
+    } finally {
+      setIsAisaThinking(false);
+    }
+  };
+
   const handleCapturedSpeech = (text: string) => {
     const command = matchVoiceNavigationCommand(text);
     if (command) {
       handleVoiceCommand(command);
+      return;
+    }
+    if (aiMode()) {
+      void handleRepQuestion(text);
       return;
     }
     recordReply(text);
@@ -270,11 +326,38 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
     }
   };
 
+  /**
+   * Speaks the whole brief as one TTS turn (paragraphs, then one line per call objective, then
+   * the "need anything else?" invitation), and opens the mic when it lands so the rep can ask
+   * their follow-ups — the beat where Marcus asks about the invoice in the script.
+   */
+  const narrateBriefing = async () => {
+    setIsAisaThinking(true);
+    try {
+      const result = await generateBriefingNarration(aisaContext());
+      if (!result) return;
+      setNarration(result);
+      speechToken += 1;
+      const currentToken = speechToken;
+      const listenForQuestions = () => {
+        if (currentToken !== speechToken || isVoiceDisabled()) return;
+        startVoiceCapture();
+      };
+      const spoken = [...result.paragraphs, ...result.objectiveLines, result.invitation].join(' ');
+      const spoke = speakText(spoken, 'en-US', listenForQuestions);
+      if (!spoke && speechSupported()) listenForQuestions();
+    } finally {
+      setIsAisaThinking(false);
+    }
+  };
+
   const startBriefing = () => {
     setPromptIndex(0);
     setReachedEnd(false);
     setExchanges([]);
+    setNarration(undefined);
     setStep('qa');
+    if (aiMode()) void narrateBriefing();
   };
 
   const handleSimulateAnswer = () => {
@@ -296,6 +379,7 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
 
   const endBriefing = () => {
     setExchanges([]);
+    setNarration(undefined);
     setPromptIndex(0);
     setReachedEnd(false);
     setStep('ended');
@@ -304,6 +388,7 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
 
   const simulateApproach = () => {
     setExchanges([]);
+    setNarration(undefined);
     setPromptIndex(0);
     setReachedEnd(false);
     setStep('ended');
@@ -312,6 +397,9 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
 
   createEffect(() => {
     if (step() !== 'qa') return;
+    // AI mode drives its own speech from `narrateBriefing` / `handleRepQuestion`; there is no
+    // scripted prompt list to walk here.
+    if (aiMode()) return;
     const question = currentQuestion();
     if (!question || reachedEnd()) return;
     stopVoiceCapture();
@@ -355,15 +443,27 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
         <div class="assistant-briefing-copy">
           <Sparkles size={17} />
           <div>
-            <p>{props.briefing.executiveSummary}</p>
-            <Show when={props.briefing.opportunitySummary}>
-              {(summary) => <p>{summary()}</p>}
-            </Show>
-            <Show when={props.briefing.blockers.length > 0}>
-              <p>Watch out for: {props.briefing.blockers.join('; ')}.</p>
-            </Show>
-            <Show when={props.briefing.recentTopics.length > 0}>
-              <p>Recent threads: {props.briefing.recentTopics.join(' | ')}</p>
+            <Show
+              when={narration()}
+              fallback={
+                <>
+                  <p>{props.briefing.executiveSummary}</p>
+                  <Show when={props.briefing.opportunitySummary}>
+                    {(summary) => <p>{summary()}</p>}
+                  </Show>
+                  <Show when={props.briefing.blockers.length > 0}>
+                    <p>Watch out for: {props.briefing.blockers.join('; ')}.</p>
+                  </Show>
+                  <Show when={props.briefing.recentTopics.length > 0}>
+                    <p>Recent threads: {props.briefing.recentTopics.join(' | ')}</p>
+                  </Show>
+                  <Show when={aiMode() && isAisaThinking()}>
+                    <p>Pulling your 90-day summary…</p>
+                  </Show>
+                </>
+              }
+            >
+              {(spoken) => <For each={spoken().paragraphs}>{(paragraph) => <p>{paragraph}</p>}</For>}
             </Show>
           </div>
         </div>
@@ -374,12 +474,12 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
           </span>
           <div class="visit-objective-list">
             <For each={objectives()}>
-              {(objective) => (
+              {(objective, index) => (
                 <div class="visit-objective-item">
                   <CheckCircle2 size={15} />
                   <div>
                     <span>{objective.label}</span>
-                    <p>{objective.detail}</p>
+                    <p>{narration()?.objectiveLines[index()] ?? objective.detail}</p>
                   </div>
                 </div>
               )}
@@ -392,15 +492,49 @@ function AisaBriefingDialog(props: AisaBriefingDialogProps) {
             <For each={exchanges()}>
               {(exchange) => (
                 <div class="aisa-exchange">
-                  <p class="aisa-exchange-question">{exchange.question}</p>
-                  <p class="aisa-exchange-answer">{exchange.answer}</p>
+                  <p class="aisa-exchange-question">
+                    {exchange.direction === 'rep-asks' ? 'You: ' : ''}{exchange.question}
+                  </p>
+                  <p class="aisa-exchange-answer">
+                    {exchange.direction === 'rep-asks' ? 'AISA: ' : ''}{exchange.answer}
+                  </p>
                 </div>
               )}
             </For>
           </section>
         </Show>
 
-        <Show when={!reachedEnd() && currentQuestion()}>
+        <Show when={aiMode() && !reachedEnd()}>
+          <section class="aisa-section">
+            <span class="eyebrow">
+              <MessageCircleQuestion size={13} /> Ask AISA anything
+            </span>
+            <p class="aisa-exchange-question">
+              {narration()?.invitation ?? 'Do you need any additional details on this account?'}
+            </p>
+            <div class="voice-transcript" aria-live="polite">
+              <span class="eyebrow">
+                {isListening() ? <Mic size={13} /> : <MicOff size={13} />}
+                {isListening() ? 'Listening…' : 'Your question'}
+              </span>
+              <p>
+                {isAisaThinking()
+                  ? 'AISA is checking the CRM…'
+                  : interimTranscript() || 'Ask about the invoice, the opportunity, the contacts — anything on file. Say "finish" when you are done.'}
+              </p>
+            </div>
+            <div class="voice-action-row">
+              <button class="secondary-action wide" onClick={() => setReachedEnd(true)}>
+                Done asking
+              </button>
+            </div>
+            <Show when={voiceNotice()}>
+              <p class="assistant-demo-note" aria-live="polite">{voiceNotice()}</p>
+            </Show>
+          </section>
+        </Show>
+
+        <Show when={!aiMode() && !reachedEnd() && currentQuestion()}>
           {(question) => (
             <section class="aisa-section">
               <span class="eyebrow">
